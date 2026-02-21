@@ -1209,18 +1209,15 @@ function gameLoop() {
     var btn = document.getElementById(id);
     if (!btn) return;
     var codes = btnMap[id];
-    var on  = function(e){ e.preventDefault(); codes.forEach(function(c){keys[c]=true;}); };
+    var on  = function(e){ e.preventDefault(); codes.forEach(function(c){keys[c]=true;}); btn.setPointerCapture(e.pointerId); };
     var off = function(e){ e.preventDefault(); codes.forEach(function(c){keys[c]=false;}); };
-    btn.addEventListener('touchstart',  on,  {passive:false});
-    btn.addEventListener('touchend',    off, {passive:false});
-    btn.addEventListener('touchcancel', off, {passive:false});
-    btn.addEventListener('mousedown',   on);
-    btn.addEventListener('mouseup',     off);
-    btn.addEventListener('mouseleave',  off);
+    btn.addEventListener('pointerdown',   on,  {passive:false});
+    btn.addEventListener('pointerup',     off, {passive:false});
+    btn.addEventListener('pointercancel', off, {passive:false});
   });
 
   // Tap canvas on non-play screens to advance
-  canvas.addEventListener('touchend', function(e) {
+  canvas.addEventListener('pointerup', function(e) {
     e.preventDefault();
     if (state === 'gameover' || state === 'win') {
       keys['KeyR'] = true;
