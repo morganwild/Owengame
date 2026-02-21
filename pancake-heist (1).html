@@ -17,6 +17,16 @@ canvas{display:block;image-rendering:pixelated;border:2px solid #333;cursor:none
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="touchpad">
+  <div id="dpad">
+    <button class="tbtn" id="btn-left">&#9664;</button>
+    <button class="tbtn" id="btn-right">&#9654;</button>
+  </div>
+  <div id="abuttons">
+    <button class="tbtn" id="btn-down">&#9660;</button>
+    <button class="tbtn" id="btn-jump">&#9650;</button>
+  </div>
+</div>
 <script>
 // ============================================================
 // THE PANCAKE HEIST - Platform Game based on Owen Crowley's story
@@ -1231,15 +1241,5 @@ function gameLoop() {
 
 gameLoop();
 </script>
-<div id="touchpad">
-  <div id="dpad">
-    <button class="tbtn" id="btn-left">&#9664;</button>
-    <button class="tbtn" id="btn-right">&#9654;</button>
-  </div>
-  <div id="abuttons">
-    <button class="tbtn" id="btn-down">&#9660;</button>
-    <button class="tbtn" id="btn-jump">&#9650;</button>
-  </div>
-</div>
 </body>
 </html>
