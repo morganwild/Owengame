@@ -93,6 +93,7 @@ let flyMode = false;
 let bossHP = 0;
 let bikeParts = ['pedal','seat','wheel'];
 let lostParts = [];
+let screenShake = 0;
 
 // --- CHAPTER DATA ---
 const chapters = [
@@ -475,6 +476,7 @@ function update() {
     }
 
     updateParticles();
+    if(screenShake > 0.4) screenShake *= 0.72; else screenShake = 0;
   }
 
   if(state === 'story') {
@@ -513,6 +515,7 @@ function hurtPlayer() {
   lives--;
   player.invincible = 90;
   sfxHit();
+  screenShake = 9;
   spawnParticles(player.x+14, player.y+20, '#FF0000', 12, 3);
   if(lives <= 0) {
     state = 'gameover';
@@ -521,25 +524,62 @@ function hurtPlayer() {
 
 // --- DRAW ---
 function drawBG(ch) {
-  // Sky gradient
+  // Richer 3-stop sky gradient
   const grad = ctx.createLinearGradient(0,0,0,H);
-  grad.addColorStop(0, ch.bg);
-  grad.addColorStop(1, '#000');
+  grad.addColorStop(0,   ch.bg);
+  grad.addColorStop(0.5, '#000814');
+  grad.addColorStop(1,   '#000');
   ctx.fillStyle = grad;
   ctx.fillRect(0,0,W,H);
   drawStars(frameCount);
 
-  // Parallax mountains
-  ctx.fillStyle = ch.ground + '44';
+  // Distant slow clouds (faintest)
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  for(let i=0;i<5;i++) {
+    const cx = ((i*340 - camera.x*0.04 + frameCount*0.06) % (W+500)) - 250;
+    drawCloud(cx, 40 + (i%3)*32, 55 + i*10);
+  }
+
+  // Far parallax mountains with snow caps
   for(let i=0;i<5;i++) {
     const px = ((i*250 - camera.x*0.2) % (W+400)) - 200;
-    drawMountain(px, H-200, 250+i*20, 160+i*10);
+    const mw = 250+i*20, mh = 160+i*10;
+    ctx.fillStyle = ch.ground + '44';
+    drawMountain(px, H-200, mw, mh);
+    // Snow cap — smaller white triangle at the peak
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    drawMountain(px + mw*0.3, H-200, mw*0.4, mh*0.32);
   }
+
+  // Mid clouds (slightly visible)
+  ctx.fillStyle = 'rgba(255,255,255,0.07)';
+  for(let i=0;i<4;i++) {
+    const cx = ((i*410 - camera.x*0.1 + frameCount*0.13) % (W+460)) - 230;
+    drawCloud(cx, 90 + (i%3)*36, 38 + i*7);
+  }
+
+  // Near parallax mountains
   ctx.fillStyle = ch.ground + '88';
   for(let i=0;i<7;i++) {
     const px = ((i*180 - camera.x*0.4) % (W+300)) - 150;
     drawMountain(px, H-120, 180, 100);
   }
+
+  // Subtle ground-level haze
+  const haze = ctx.createLinearGradient(0, H-100, 0, H-50);
+  haze.addColorStop(0, 'rgba(200,220,255,0)');
+  haze.addColorStop(1, 'rgba(200,220,255,0.06)');
+  ctx.fillStyle = haze;
+  ctx.fillRect(0, H-100, W, 50);
+}
+
+function drawCloud(cx, cy, r) {
+  ctx.beginPath();
+  ctx.arc(cx,         cy,         r,       0, Math.PI*2);
+  ctx.arc(cx+r*0.8,   cy-r*0.25,  r*0.65,  0, Math.PI*2);
+  ctx.arc(cx+r*1.5,   cy,         r*0.55,  0, Math.PI*2);
+  ctx.arc(cx+r*0.5,   cy+r*0.2,   r*0.5,   0, Math.PI*2);
+  ctx.fill();
 }
 
 function drawMountain(x, y, w, h) {
@@ -1061,6 +1101,8 @@ function gameLoop() {
     drawStory();
   } else if(state === 'play') {
     const ch = chapters[level];
+    ctx.save();
+    if(screenShake > 0.5) ctx.translate((Math.random()-0.5)*screenShake, (Math.random()-0.5)*screenShake);
     drawBG(ch);
     drawPlatforms(ch);
     drawCoins();
@@ -1070,6 +1112,7 @@ function gameLoop() {
     drawCheeseBalls();
     drawPlayer();
     drawParticles();
+    ctx.restore();
     drawHUD();
   } else if(state === 'gameover') {
     drawGameOver();
