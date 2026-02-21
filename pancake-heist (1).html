@@ -6,9 +6,13 @@
 <title>The Pancake Heist - A Platform Game</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;overflow:hidden;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;height:100vh}
-canvas{display:block;image-rendering:pixelated;border:2px solid #333;cursor:none}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;height:100vh;touch-action:none}
+canvas{display:block;image-rendering:pixelated;border:2px solid #333;cursor:none;max-width:100vw;max-height:100vh}
 #ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+#touchpad{position:fixed;bottom:0;left:0;width:100%;display:flex;justify-content:space-between;padding:16px 22px 30px;z-index:100;pointer-events:none;touch-action:none}
+#dpad,#abuttons{display:flex;gap:10px;align-items:flex-end;pointer-events:auto}
+.tbtn{width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,0.13);border:2px solid rgba(255,255,255,0.32);color:rgba(255,255,255,0.9);font-size:22px;cursor:pointer;touch-action:none;user-select:none;-webkit-tap-highlight-color:transparent;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 18px rgba(0,0,0,0.55);font-family:sans-serif}
+.tbtn:active{background:rgba(255,255,255,0.32);transform:scale(0.93)}
 </style>
 </head>
 <body>
@@ -1076,7 +1080,60 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
+// --- TOUCH CONTROLS + CANVAS SCALING ---
+(function initMobile() {
+  function resize() {
+    var s = Math.min(window.innerWidth / W, window.innerHeight / H);
+    canvas.style.width  = Math.floor(W * s) + 'px';
+    canvas.style.height = Math.floor(H * s) + 'px';
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  var btnMap = {
+    'btn-left':  ['ArrowLeft'],
+    'btn-right': ['ArrowRight'],
+    'btn-jump':  ['ArrowUp', 'Space'],
+    'btn-down':  ['ArrowDown']
+  };
+  Object.keys(btnMap).forEach(function(id) {
+    var btn = document.getElementById(id);
+    if (!btn) return;
+    var codes = btnMap[id];
+    var on  = function(e){ e.preventDefault(); codes.forEach(function(c){keys[c]=true;}); };
+    var off = function(e){ e.preventDefault(); codes.forEach(function(c){keys[c]=false;}); };
+    btn.addEventListener('touchstart',  on,  {passive:false});
+    btn.addEventListener('touchend',    off, {passive:false});
+    btn.addEventListener('touchcancel', off, {passive:false});
+    btn.addEventListener('mousedown',   on);
+    btn.addEventListener('mouseup',     off);
+    btn.addEventListener('mouseleave',  off);
+  });
+
+  // Tap canvas on non-play screens to advance
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    if (state === 'gameover' || state === 'win') {
+      keys['KeyR'] = true;
+      setTimeout(function(){ keys['KeyR'] = false; }, 120);
+    } else if (state !== 'play') {
+      keys['Space'] = true;
+      setTimeout(function(){ keys['Space'] = false; }, 120);
+    }
+  }, {passive:false});
+})();
+
 gameLoop();
 </script>
+<div id="touchpad">
+  <div id="dpad">
+    <button class="tbtn" id="btn-left">&#9664;</button>
+    <button class="tbtn" id="btn-right">&#9654;</button>
+  </div>
+  <div id="abuttons">
+    <button class="tbtn" id="btn-down">&#9660;</button>
+    <button class="tbtn" id="btn-jump">&#9650;</button>
+  </div>
+</div>
 </body>
 </html>
