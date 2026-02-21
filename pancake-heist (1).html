@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Pancake Heist - A Platform Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;height:100vh}
+canvas{display:block;image-rendering:pixelated;border:2px solid #333;cursor:none}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+// ============================================================
+// THE PANCAKE HEIST - Platform Game based on Owen Crowley's story
+// ============================================================
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = 960, H = 640;
+canvas.width = W; canvas.height = H;
+
+// --- AUDIO ENGINE ---
+const AC = new (window.AudioContext || window.webkitAudioContext)();
+function playTone(freq, dur, type='square', vol=0.08) {
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(); o.stop(AC.currentTime + dur);
+}
+function sfxJump(){playTone(400,0.1);playTone(600,0.1)}
+function sfxCoin(){playTone(800,0.08);setTimeout(()=>playTone(1200,0.12),80)}
+function sfxHit(){playTone(150,0.3,'sawtooth',0.1)}
+function sfxWin(){[0,100,200,300,400].forEach((d,i)=>setTimeout(()=>playTone(400+i*100,0.2,'triangle'),d))}
+function sfxExplode(){playTone(80,0.4,'sawtooth',0.12);playTone(60,0.5,'square',0.08)}
+
+// --- INPUT ---
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.code] = true; if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); });
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+// --- PARTICLES ---
+let particles = [];
+function spawnParticles(x, y, color, count=10, speed=3) {
+  for(let i=0;i<count;i++) {
+    const a = Math.random()*Math.PI*2;
+    particles.push({x,y,vx:Math.cos(a)*speed*(0.5+Math.random()),vy:Math.sin(a)*speed*(0.5+Math.random()),life:1,color,size:2+Math.random()*3});
+  }
+}
+function updateParticles() {
+  particles = particles.filter(p => {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life -= 0.02; p.size *= 0.98;
+    return p.life > 0;
+  });
+}
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+// --- STAR BACKGROUND ---
+const stars = Array.from({length:80}, () => ({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.5,b:Math.random()}));
+
+function drawStars(t) {
+  stars.forEach(s => {
+    const b = 0.3 + 0.7 * Math.sin(t*0.001 + s.b*10);
+    ctx.fillStyle = `rgba(255,255,220,${b})`;
+    ctx.fillRect(s.x, s.y, s.s, s.s);
+  });
+}
+
+// --- GAME STATE ---
+let state = 'title'; // title, story, play, win, gameover
+let level = 0;
+let player, platforms, coins, enemies, goal, camera;
+let score = 0, lives = 3, storyTimer = 0;
+let frameCount = 0;
+let cheeseBalls = [];
+let clueBoxes = [];
+let flyMode = false;
+let bossHP = 0;
+let bikeParts = ['pedal','seat','wheel'];
+let lostParts = [];
+
+// --- CHAPTER DATA ---
+const chapters = [
+  {
+    title: "Chapter 1: The Dinner Recipe",
+    story: "The world's most famous pancake mix sits in a house...\nA greedy kid named Owen plans to steal it.\nHe's been riding his bike for a DECADE just to get it!",
+    bg: '#1a0a2e', ground: '#2d5016', platformColor: '#8B4513',
+    type: 'ride', length: 3000
+  },
+  {
+    title: "Chapter 2: The Plan",
+    story: "Owen is part of a gang of four 13-year-olds.\nThe plan: split up! One unlocks the front door,\none the back, one distracts, and the leader steals it!",
+    bg: '#0a1628', ground: '#1a3a0a', platformColor: '#654321',
+    type: 'ride', length: 3500
+  },
+  {
+    title: "Chapter 3: The Bike Ride Begins",
+    story: "The gang hops on their bikes and rides out!\nBut oh no... one kid's pedals fall off!\nOne down, three more to go...",
+    bg: '#1a0a1e', ground: '#2d4016', platformColor: '#7B3F00',
+    type: 'ride', length: 3000
+  },
+  {
+    title: "Chapter 4: Bikes Breaking Down",
+    story: "Another kid's wheel supports break!\nThen another's wheels fall off completely!\nOnly Owen the leader is left... and his bike is falling apart too!",
+    bg: '#0d1117', ground: '#1a3a1a', platformColor: '#5C3317',
+    type: 'bike_chaos', length: 4000
+  },
+  {
+    title: "Chapter 5: The Arrival",
+    story: "Owen FINALLY arrives... alone.\nThe family isn't home! But there are cameras...\nAnd the door is LEFT OPEN. Easy heist? Maybe not...",
+    bg: '#1a1028', ground: '#3d3016', platformColor: '#8B6914',
+    type: 'house', length: 2500
+  },
+  {
+    title: "Chapter 6: The Real Attempt",
+    story: "Little does Owen know... the family is HIDING in the basement!\nHe sneaks to unlock the back door for escape.\nHis friends are all in the hospital...",
+    bg: '#0a0a18', ground: '#2a2016', platformColor: '#6B4423',
+    type: 'stealth', length: 3000
+  },
+  {
+    title: "Chapter 7: Finding Clues",
+    story: "Owen finds the first clue!\n'What is a rectangle with handles that keeps treats frozen?'\nTHE FRIDGE! Correct!",
+    bg: '#101828', ground: '#1d3d2d', platformColor: '#4682B4',
+    type: 'puzzle', length: 2500
+  },
+  {
+    title: "Chapter 8: All Three Clues",
+    story: "The fridge has another clue!\n'What is under houses and protects items from being stolen?'\nTHE BASEMENT! He finds the pancake mix box!",
+    bg: '#180818', ground: '#2d1d2d', platformColor: '#9370DB',
+    type: 'puzzle', length: 3000
+  },
+  {
+    title: "Chapter 9: The Flying Bike",
+    story: "Owen grabs the mix and remembers his bike is broken!\nBut wait... he's a TRILLIONAIRE!\nHis bike bell reveals TIRES WITH WINGS! The bike can FLY!",
+    bg: '#081028', ground: '#162d16', platformColor: '#DAA520',
+    type: 'flying', length: 4000
+  },
+  {
+    title: "Chapter 10: The Chase Begins",
+    story: "The family notices the pancake mix is GONE!\nThey hop in their car that shoots EXPLOSIVE CHEESE BALLS!\nBut Owen's bike is made of NETHERITE!",
+    bg: '#180808', ground: '#3d1616', platformColor: '#B22222',
+    type: 'chase', length: 4500
+  },
+  {
+    title: "Chapter 11: Cheese Ball Chaos",
+    story: "20 MILLION cheese balls explode Owen's tire!\nAnother 20 million destroy his bike!\nThe box flies through the air at 100 BILLION mph!\nThe family's kid catches it!",
+    bg: '#281808', ground: '#3d2d06', platformColor: '#FF8C00',
+    type: 'boss', length: 3500
+  },
+  {
+    title: "Chapter 12: The End",
+    story: "Owen lands and gets a call from the hospital...\nHis friends have 'fallen asleep'...\n'They're coming for you, Owen...'\nTHE END - Buy on eBay for 1 penny!",
+    bg: '#080808', ground: '#1a1a1a', platformColor: '#444',
+    type: 'finale', length: 2000
+  }
+];
+
+// --- LEVEL GENERATOR ---
+function generateLevel(idx) {
+  const ch = chapters[idx];
+  player = {x:80, y:H-200, w:28, h:40, vx:0, vy:0, grounded:false, facing:1, frame:0, onBike:true, flying:false, invincible:0, flash:0};
+  platforms = [];
+  coins = [];
+  enemies = [];
+  cheeseBalls = [];
+  clueBoxes = [];
+  flyMode = ch.type === 'flying' || ch.type === 'chase' || ch.type === 'boss';
+  player.flying = flyMode;
+  player.onBike = true;
+  lostParts = [];
+  bossHP = ch.type === 'boss' ? 20 : 0;
+  camera = {x:0, y:0};
+
+  // Ground
+  for(let x=0; x<ch.length; x+=40) {
+    platforms.push({x, y:H-60, w:40, h:60, type:'ground'});
+  }
+
+  const len = ch.length;
+
+  if(ch.type === 'ride' || ch.type === 'bike_chaos') {
+    // Platforming level with coins and gaps
+    for(let x=300; x<len-200; x+=120+Math.random()*200) {
+      const py = H - 140 - Math.random()*200;
+      const pw = 60 + Math.random()*100;
+      platforms.push({x, y:py, w:pw, h:16, type:'platform'});
+      if(Math.random()>0.3) coins.push({x:x+pw/2, y:py-30, collected:false});
+    }
+    // Gaps in ground
+    for(let x=500; x<len-400; x+=300+Math.random()*400) {
+      platforms = platforms.filter(p => !(p.type==='ground' && p.x>=x && p.x<x+120));
+    }
+    // Enemies
+    for(let x=400; x<len-200; x+=250+Math.random()*300) {
+      enemies.push({x, y:H-100, w:30, h:30, vx:1+Math.random(), type:'walker', alive:true, frame:0});
+    }
+    if(ch.type === 'bike_chaos') {
+      // Falling bike parts as collectible warnings
+      for(let x=500; x<len; x+=600) {
+        coins.push({x, y:H-200, collected:false, type:'bikepart'});
+      }
+    }
+  }
+
+  if(ch.type === 'house' || ch.type === 'stealth') {
+    // Indoor level with rooms
+    platforms = [];
+    // Floor
+    for(let x=0;x<len;x+=40) platforms.push({x,y:H-40,w:40,h:40,type:'ground'});
+    // Ceiling
+    for(let x=0;x<len;x+=40) platforms.push({x,y:0,w:40,h:30,type:'ceiling'});
+    // Shelves/platforms
+    for(let x=200;x<len-100;x+=150+Math.random()*100) {
+      platforms.push({x, y:H-160-Math.random()*150, w:80+Math.random()*60, h:12, type:'platform'});
+    }
+    // Camera enemies
+    for(let x=300;x<len-100;x+=200+Math.random()*200) {
+      enemies.push({x, y:80, w:24, h:24, type:'camera', alive:true, angle:0, frame:0});
+    }
+    coins.push({x:len-150, y:H-120, collected:false, type:ch.type==='stealth'?'key':'door'});
+  }
+
+  if(ch.type === 'puzzle') {
+    platforms = [];
+    for(let x=0;x<len;x+=40) platforms.push({x,y:H-40,w:40,h:40,type:'ground'});
+    for(let x=0;x<len;x+=40) platforms.push({x,y:0,w:40,h:30,type:'ceiling'});
+    // Clue boxes
+    const cluePositions = [len*0.25, len*0.5, len*0.75];
+    cluePositions.forEach((cx,i) => {
+      platforms.push({x:cx-40,y:H-180,w:80,h:14,type:'platform'});
+      clueBoxes.push({x:cx,y:H-220,w:36,h:36,opened:false,clueIdx:i});
+    });
+    for(let x=200;x<len;x+=180) {
+      platforms.push({x,y:H-120-Math.random()*160,w:70,h:14,type:'platform'});
+    }
+    for(let x=300;x<len;x+=250) {
+      coins.push({x, y:H-180, collected:false});
+    }
+  }
+
+  if(ch.type === 'flying' || ch.type === 'chase') {
+    platforms = [];
+    // No ground - flying level!
+    // Floating platforms as obstacles
+    for(let x=200;x<len;x+=100+Math.random()*150) {
+      const py = 100+Math.random()*(H-200);
+      platforms.push({x,y:py,w:50+Math.random()*60,h:16,type:'platform'});
+    }
+    // Coins in the air
+    for(let x=150;x<len;x+=80+Math.random()*80) {
+      coins.push({x, y:100+Math.random()*(H-200), collected:false});
+    }
+    if(ch.type === 'chase') {
+      // Cheese balls spawn during gameplay
+    }
+  }
+
+  if(ch.type === 'boss') {
+    platforms = [];
+    for(let x=0;x<len;x+=40) platforms.push({x,y:H-40,w:40,h:40,type:'ground'});
+    // Boss arena platforms
+    for(let y=H-160;y>100;y-=120) {
+      for(let x=100;x<len-100;x+=200) {
+        platforms.push({x,y,w:100,h:14,type:'platform'});
+      }
+    }
+    enemies.push({x:len-300,y:H-140,w:80,h:80,type:'boss',alive:true,hp:20,vx:2,frame:0,shootTimer:0});
+  }
+
+  if(ch.type === 'finale') {
+    platforms = [];
+    for(let x=0;x<len;x+=40) platforms.push({x,y:H-40,w:40,h:40,type:'ground'});
+    for(let x=100;x<len;x+=60) {
+      coins.push({x, y:H-80-Math.random()*200, collected:false});
+    }
+  }
+
+  // Goal at end
+  goal = {x: len - 100, y: H - 140, w: 40, h: 80};
+}
+
+// --- UPDATE ---
+function update() {
+  frameCount++;
+  const ch = chapters[level];
+
+  if(state === 'play') {
+    // Player movement
+    const spd = player.flying ? 4 : 5;
+    if(keys['ArrowLeft'] || keys['KeyA']) { player.vx = -spd; player.facing = -1; }
+    else if(keys['ArrowRight'] || keys['KeyD']) { player.vx = spd; player.facing = 1; }
+    else player.vx *= 0.7;
+
+    if(player.flying) {
+      if(keys['ArrowUp'] || keys['KeyW']) player.vy = -4;
+      else if(keys['ArrowDown'] || keys['KeyS']) player.vy = 4;
+      else player.vy *= 0.85;
+      // Clamp in bounds
+      player.y = Math.max(10, Math.min(H-60, player.y));
+      // Spawn trail
+      if(frameCount%3===0) spawnParticles(player.x, player.y+player.h, '#FFD700', 2, 1);
+    } else {
+      if((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.grounded) {
+        player.vy = -12;
+        player.grounded = false;
+        sfxJump();
+      }
+      player.vy += 0.6; // gravity
+      if(player.vy > 12) player.vy = 12;
+    }
+
+    player.x += player.vx;
+    player.y += player.vy;
+    player.grounded = false;
+    player.frame += 0.15;
+    if(player.invincible > 0) player.invincible--;
+
+    // Platform collision
+    platforms.forEach(p => {
+      if(player.x+player.w > p.x && player.x < p.x+p.w &&
+         player.y+player.h > p.y && player.y+player.h < p.y+p.h+10 && player.vy >= 0) {
+        if(p.type !== 'ceiling') {
+          player.y = p.y - player.h;
+          player.vy = 0;
+          player.grounded = true;
+        }
+      }
+      // Ceiling
+      if(p.type === 'ceiling' && player.x+player.w > p.x && player.x < p.x+p.w &&
+         player.y < p.y+p.h && player.y > p.y) {
+        player.y = p.y + p.h;
+        player.vy = 1;
+      }
+    });
+
+    // Fall death
+    if(player.y > H + 50) {
+      hurtPlayer();
+      player.x = camera.x + 80;
+      player.y = 100;
+      player.vy = 0;
+    }
+
+    // Coins
+    coins.forEach(c => {
+      if(!c.collected && Math.abs(player.x+14-c.x)<24 && Math.abs(player.y+20-c.y)<24) {
+        c.collected = true;
+        score += c.type === 'bikepart' ? 50 : (c.type === 'key' || c.type === 'door') ? 200 : 10;
+        sfxCoin();
+        spawnParticles(c.x, c.y, c.type==='bikepart'?'#888':'#FFD700', 8);
+        if(c.type === 'bikepart' && bikeParts.length) {
+          lostParts.push(bikeParts.shift());
+        }
+      }
+    });
+
+    // Clue boxes
+    clueBoxes.forEach(cb => {
+      if(!cb.opened && Math.abs(player.x+14-cb.x)<30 && Math.abs(player.y+20-cb.y)<40) {
+        cb.opened = true;
+        score += 100;
+        sfxWin();
+        spawnParticles(cb.x, cb.y, '#00FFFF', 15, 4);
+      }
+    });
+
+    // Enemies
+    enemies.forEach(e => {
+      if(!e.alive) return;
+      if(e.type === 'walker') {
+        e.x += e.vx;
+        e.frame += 0.1;
+        // Bounce off edges
+        let onPlatform = false;
+        platforms.forEach(p => {
+          if(e.x+e.w > p.x && e.x < p.x+p.w && Math.abs((e.y+e.h)-p.y)<5) onPlatform = true;
+        });
+        if(!onPlatform || e.x < camera.x - 10 || e.x > camera.x + W + 10) e.vx *= -1;
+
+        // Player collision
+        if(player.invincible<=0 && Math.abs(player.x+14-(e.x+15))<30 && Math.abs(player.y+20-(e.y+15))<35) {
+          if(player.vy > 0 && player.y < e.y) {
+            e.alive = false;
+            player.vy = -8;
+            score += 25;
+            sfxExplode();
+            spawnParticles(e.x+15, e.y+15, '#FF4444', 12);
+          } else {
+            hurtPlayer();
+          }
+        }
+      }
+      if(e.type === 'camera') {
+        e.angle = Math.sin(frameCount*0.02)*0.8;
+        // Detection beam
+        const beamX = e.x + Math.cos(e.angle + Math.PI/2)*120;
+        const beamY = e.y + Math.sin(e.angle + Math.PI/2)*120;
+        if(player.invincible<=0 && Math.abs(player.x+14-beamX)<40 && Math.abs(player.y+20-beamY)<40) {
+          hurtPlayer();
+        }
+      }
+      if(e.type === 'boss') {
+        e.x += e.vx;
+        if(e.x < camera.x + 100 || e.x > camera.x + W - 200) e.vx *= -1;
+        e.shootTimer++;
+        if(e.shootTimer > 40) {
+          e.shootTimer = 0;
+          cheeseBalls.push({x:e.x+40, y:e.y+40, vx:(player.x-e.x)*0.02, vy:(player.y-e.y)*0.02, life:200});
+          sfxHit();
+        }
+        // Stomp boss
+        if(player.vy > 0 && player.y+player.h > e.y && player.y < e.y &&
+           player.x+player.w > e.x && player.x < e.x+e.w) {
+          e.hp--;
+          player.vy = -10;
+          sfxExplode();
+          spawnParticles(e.x+40, e.y, '#FFD700', 15, 5);
+          if(e.hp <= 0) {
+            e.alive = false;
+            score += 500;
+            spawnParticles(e.x+40, e.y+40, '#FF8C00', 30, 6);
+          }
+        } else if(player.invincible<=0 && Math.abs(player.x+14-(e.x+40))<50 && Math.abs(player.y+20-(e.y+40))<50) {
+          hurtPlayer();
+        }
+      }
+    });
+
+    // Cheese balls
+    if(ch.type === 'chase' && frameCount % 30 === 0) {
+      cheeseBalls.push({x:camera.x+W+20, y:100+Math.random()*(H-200), vx:-4-Math.random()*3, vy:(Math.random()-0.5)*2, life:300});
+    }
+    cheeseBalls = cheeseBalls.filter(cb => {
+      cb.x += cb.vx; cb.y += cb.vy; cb.life--;
+      if(player.invincible<=0 && Math.abs(player.x+14-cb.x)<20 && Math.abs(player.y+20-cb.y)<20) {
+        hurtPlayer();
+        sfxExplode();
+        spawnParticles(cb.x, cb.y, '#FFA500', 10, 4);
+        return false;
+      }
+      return cb.life > 0;
+    });
+
+    // Camera
+    camera.x = player.x - W/3;
+    if(camera.x < 0) camera.x = 0;
+    if(camera.x > ch.length - W) camera.x = ch.length - W;
+
+    // Goal
+    if(player.x + player.w > goal.x && player.x < goal.x + goal.w &&
+       player.y + player.h > goal.y && player.y < goal.y + goal.h) {
+      sfxWin();
+      if(level < chapters.length - 1) {
+        level++;
+        state = 'story';
+        storyTimer = 0;
+      } else {
+        state = 'win';
+      }
+    }
+
+    updateParticles();
+  }
+
+  if(state === 'story') {
+    storyTimer++;
+    if((keys['Space'] || keys['Enter']) && storyTimer > 30) {
+      generateLevel(level);
+      state = 'play';
+      keys['Space'] = false;
+      keys['Enter'] = false;
+    }
+  }
+
+  if(state === 'title') {
+    if(keys['Space'] || keys['Enter']) {
+      state = 'story';
+      storyTimer = 0;
+      level = 0;
+      score = 0;
+      lives = 3;
+      AC.resume();
+    }
+  }
+
+  if(state === 'gameover' || state === 'win') {
+    if(keys['KeyR']) {
+      state = 'title';
+      level = 0;
+      score = 0;
+      lives = 3;
+    }
+  }
+}
+
+function hurtPlayer() {
+  if(player.invincible > 0) return;
+  lives--;
+  player.invincible = 90;
+  sfxHit();
+  spawnParticles(player.x+14, player.y+20, '#FF0000', 12, 3);
+  if(lives <= 0) {
+    state = 'gameover';
+  }
+}
+
+// --- DRAW ---
+function drawBG(ch) {
+  // Sky gradient
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, ch.bg);
+  grad.addColorStop(1, '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+  drawStars(frameCount);
+
+  // Parallax mountains
+  ctx.fillStyle = ch.ground + '44';
+  for(let i=0;i<5;i++) {
+    const px = ((i*250 - camera.x*0.2) % (W+400)) - 200;
+    drawMountain(px, H-200, 250+i*20, 160+i*10);
+  }
+  ctx.fillStyle = ch.ground + '88';
+  for(let i=0;i<7;i++) {
+    const px = ((i*180 - camera.x*0.4) % (W+300)) - 150;
+    drawMountain(px, H-120, 180, 100);
+  }
+}
+
+function drawMountain(x, y, w, h) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x+w/2, y-h);
+  ctx.lineTo(x+w, y);
+  ctx.fill();
+}
+
+function drawPlatforms(ch) {
+  platforms.forEach(p => {
+    const sx = p.x - camera.x, sy = p.y;
+    if(sx > -p.w && sx < W + p.w) {
+      if(p.type === 'ground') {
+        // Grass-topped ground
+        ctx.fillStyle = '#3a2a1a';
+        ctx.fillRect(sx, sy, p.w, p.h);
+        ctx.fillStyle = ch.ground;
+        ctx.fillRect(sx, sy, p.w, 8);
+        // Grass blades
+        ctx.fillStyle = '#4a8';
+        for(let gx=sx;gx<sx+p.w;gx+=6) {
+          ctx.fillRect(gx, sy-2, 2, 4);
+        }
+      } else if(p.type === 'ceiling') {
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(sx, sy, p.w, p.h);
+      } else {
+        // Floating platform
+        ctx.fillStyle = ch.platformColor;
+        ctx.fillRect(sx, sy, p.w, p.h);
+        ctx.fillStyle = '#fff3';
+        ctx.fillRect(sx, sy, p.w, 3);
+        ctx.fillStyle = '#0003';
+        ctx.fillRect(sx, sy+p.h-3, p.w, 3);
+      }
+    }
+  });
+}
+
+function drawPlayer() {
+  const px = player.x - camera.x, py = player.y;
+  if(player.invincible > 0 && frameCount % 4 < 2) return;
+
+  ctx.save();
+  ctx.translate(px + player.w/2, py + player.h/2);
+  ctx.scale(player.facing, 1);
+
+  if(player.onBike && (player.flying || flyMode)) {
+    // Flying bike with wings!
+    // Wings
+    ctx.fillStyle = '#FFD700';
+    ctx.save();
+    ctx.translate(0, 8);
+    const wingFlap = Math.sin(frameCount*0.15)*0.3;
+    ctx.rotate(wingFlap);
+    ctx.fillRect(-20, -3, 16, 6);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(0, 8);
+    ctx.scale(1,-1);
+    ctx.rotate(-Math.sin(frameCount*0.15)*0.3);
+    ctx.fillRect(-20, -3, 16, 6);
+    ctx.restore();
+    // Bike body (netherite - dark gray)
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-10, 4, 20, 6);
+    // Wheels
+    ctx.fillStyle = '#555';
+    ctx.beginPath(); ctx.arc(-8, 14, 6, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(8, 14, 6, 0, Math.PI*2); ctx.fill();
+    // Glow
+    ctx.fillStyle = '#FFD70033';
+    ctx.beginPath(); ctx.arc(0, 8, 20, 0, Math.PI*2); ctx.fill();
+  } else if(player.onBike) {
+    // Regular bike
+    ctx.fillStyle = '#C44';
+    ctx.fillRect(-8, 6, 16, 4);
+    ctx.fillStyle = '#666';
+    ctx.beginPath(); ctx.arc(-6, 14, 5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(6, 14, 5, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Owen's body
+  ctx.fillStyle = '#4488FF'; // Blue shirt
+  ctx.fillRect(-6, -4, 12, 14);
+  // Head
+  ctx.fillStyle = '#FFCC88';
+  ctx.fillRect(-5, -16, 10, 12);
+  // Hair
+  ctx.fillStyle = '#553300';
+  ctx.fillRect(-5, -18, 10, 5);
+  // Eye
+  ctx.fillStyle = '#000';
+  ctx.fillRect(1, -12, 3, 3);
+  // Legs
+  ctx.fillStyle = '#336';
+  const legAnim = player.grounded ? 0 : Math.sin(player.frame*2)*3;
+  ctx.fillRect(-5, 10, 4, 8+legAnim);
+  ctx.fillRect(1, 10, 4, 8-legAnim);
+
+  ctx.restore();
+}
+
+function drawCoins() {
+  coins.forEach(c => {
+    if(c.collected) return;
+    const cx = c.x - camera.x, cy = c.y;
+    if(cx < -20 || cx > W+20) return;
+    if(c.type === 'bikepart') {
+      ctx.fillStyle = '#888';
+      ctx.fillRect(cx-8, cy-8, 16, 16);
+      ctx.fillStyle = '#AAA';
+      ctx.fillRect(cx-4, cy-4, 8, 8);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '8px monospace';
+      ctx.fillText('?', cx-3, cy+3);
+    } else if(c.type === 'key') {
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(cx-6, cy-10, 12, 20);
+      ctx.fillStyle = '#FFA500';
+      ctx.fillRect(cx-3, cy-6, 6, 8);
+    } else if(c.type === 'door') {
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(cx-10, cy-16, 20, 32);
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath(); ctx.arc(cx+5, cy, 3, 0, Math.PI*2); ctx.fill();
+    } else {
+      // Gold coin with spin animation
+      const sw = Math.abs(Math.sin(frameCount*0.05+c.x*0.01))*10+4;
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(cx-sw/2, cy-7, sw, 14);
+      ctx.fillStyle = '#FFC200';
+      ctx.fillRect(cx-sw/4, cy-5, sw/2, 10);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '8px monospace';
+      if(sw > 8) ctx.fillText('$', cx-3, cy+3);
+    }
+  });
+}
+
+function drawEnemies() {
+  enemies.forEach(e => {
+    if(!e.alive) return;
+    const ex = e.x - camera.x, ey = e.y;
+    if(ex < -80 || ex > W+80) return;
+
+    if(e.type === 'walker') {
+      // Red angry kid
+      ctx.fillStyle = '#CC3333';
+      ctx.fillRect(ex, ey, e.w, e.h);
+      ctx.fillStyle = '#FFCC88';
+      ctx.fillRect(ex+4, ey-10, 22, 12);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(ex+8, ey-6, 3, 3);
+      ctx.fillRect(ex+18, ey-6, 3, 3);
+      // Angry eyebrows
+      ctx.fillStyle = '#800';
+      ctx.fillRect(ex+6, ey-8, 8, 2);
+      ctx.fillRect(ex+16, ey-8, 8, 2);
+    }
+
+    if(e.type === 'camera') {
+      // Security camera
+      ctx.save();
+      ctx.translate(ex+12, ey+12);
+      ctx.rotate(e.angle);
+      ctx.fillStyle = '#888';
+      ctx.fillRect(-6, -6, 12, 12);
+      ctx.fillStyle = '#F00';
+      ctx.fillRect(0, 6, 4, 20);
+      // Detection beam
+      ctx.fillStyle = '#FF000022';
+      ctx.beginPath();
+      ctx.moveTo(0, 12);
+      ctx.lineTo(-30, 120);
+      ctx.lineTo(30, 120);
+      ctx.fill();
+      ctx.restore();
+      // Blinking light
+      if(frameCount%30<15) {
+        ctx.fillStyle = '#F00';
+        ctx.beginPath(); ctx.arc(ex+12, ey+6, 3, 0, Math.PI*2); ctx.fill();
+      }
+    }
+
+    if(e.type === 'boss') {
+      // The family car!
+      ctx.fillStyle = '#2244AA';
+      ctx.fillRect(ex, ey, e.w, e.h);
+      // Car shape
+      ctx.fillStyle = '#1133AA';
+      ctx.fillRect(ex+5, ey-20, e.w-10, 25);
+      // Windows
+      ctx.fillStyle = '#88CCFF';
+      ctx.fillRect(ex+10, ey-15, 25, 15);
+      ctx.fillRect(ex+45, ey-15, 25, 15);
+      // Wheels
+      ctx.fillStyle = '#222';
+      ctx.beginPath(); ctx.arc(ex+15, ey+e.h, 10, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex+65, ey+e.h, 10, 0, Math.PI*2); ctx.fill();
+      // Cheese ball cannon
+      ctx.fillStyle = '#FFA500';
+      ctx.fillRect(ex-10, ey+20, 15, 10);
+      // HP bar
+      ctx.fillStyle = '#333';
+      ctx.fillRect(ex, ey-35, e.w, 8);
+      ctx.fillStyle = '#0F0';
+      ctx.fillRect(ex, ey-35, e.w*(e.hp/20), 8);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '8px monospace';
+      ctx.fillText('FAMILY CAR', ex+5, ey-38);
+    }
+  });
+}
+
+function drawCheeseBalls() {
+  cheeseBalls.forEach(cb => {
+    const cx = cb.x - camera.x, cy = cb.y;
+    // Cheese ball
+    ctx.fillStyle = '#FFA500';
+    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#FFCC00';
+    ctx.beginPath(); ctx.arc(cx-2, cy-2, 4, 0, Math.PI*2); ctx.fill();
+    // Trail
+    ctx.fillStyle = '#FF660033';
+    ctx.beginPath(); ctx.arc(cx-cb.vx*2, cy-cb.vy*2, 6, 0, Math.PI*2); ctx.fill();
+  });
+}
+
+function drawClueBoxes() {
+  const clueTexts = [
+    "What keeps treats frozen?",
+    "What protects items under houses?",
+    "Where is the pancake mix?"
+  ];
+  clueBoxes.forEach(cb => {
+    const cx = cb.x - camera.x, cy = cb.y;
+    ctx.fillStyle = cb.opened ? '#555' : '#00AAFF';
+    ctx.fillRect(cx-18, cy-18, 36, 36);
+    if(!cb.opened) {
+      ctx.fillStyle = '#FFF';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText('?', cx-6, cy+7);
+      // Glow
+      ctx.fillStyle = '#00AAFF33';
+      ctx.beginPath(); ctx.arc(cx, cy, 25+Math.sin(frameCount*0.1)*5, 0, Math.PI*2); ctx.fill();
+    } else {
+      ctx.fillStyle = '#0F0';
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText('✓', cx-6, cy+5);
+    }
+  });
+}
+
+function drawGoal() {
+  const gx = goal.x - camera.x, gy = goal.y;
+  // Pancake mix box
+  const bob = Math.sin(frameCount*0.05)*5;
+  ctx.fillStyle = '#FFD700';
+  ctx.fillRect(gx, gy+bob, goal.w, goal.h);
+  ctx.fillStyle = '#D4A017';
+  ctx.fillRect(gx+3, gy+3+bob, goal.w-6, goal.h-6);
+  // Label
+  ctx.fillStyle = '#FFF';
+  ctx.font = 'bold 8px monospace';
+  ctx.save();
+  ctx.translate(gx+20, gy+25+bob);
+  ctx.fillText('PAN', -10, -5);
+  ctx.fillText('CAKE', -12, 5);
+  ctx.fillText('MIX', -8, 15);
+  ctx.restore();
+  // Sparkles
+  for(let i=0;i<3;i++) {
+    const sx = gx+20+Math.sin(frameCount*0.03+i*2)*25;
+    const sy = gy+40+bob+Math.cos(frameCount*0.04+i*2)*30;
+    ctx.fillStyle = `rgba(255,215,0,${0.5+Math.sin(frameCount*0.1+i)*0.5})`;
+    ctx.fillRect(sx-1, sy-1, 3, 3);
+  }
+}
+
+function drawHUD() {
+  // Score
+  ctx.fillStyle = '#000A';
+  ctx.fillRect(10, 10, 200, 45);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText(`SCORE: ${score}`, 20, 30);
+  ctx.fillStyle = '#FF4444';
+  ctx.fillText(`LIVES: ${'♥'.repeat(Math.max(0,lives))}`, 20, 48);
+
+  // Chapter title
+  ctx.fillStyle = '#FFF8';
+  ctx.font = '12px monospace';
+  ctx.fillText(chapters[level].title, W/2-100, 20);
+
+  // Boss HP
+  if(bossHP > 0) {
+    const boss = enemies.find(e=>e.type==='boss'&&e.alive);
+    if(boss) {
+      ctx.fillStyle = '#0008';
+      ctx.fillRect(W/2-100, 40, 200, 16);
+      ctx.fillStyle = '#F44';
+      ctx.fillRect(W/2-98, 42, 196*(boss.hp/20), 12);
+      ctx.fillStyle = '#FFF';
+      ctx.font = '10px monospace';
+      ctx.fillText('FAMILY CAR', W/2-30, 52);
+    }
+  }
+
+  // Lost bike parts
+  if(lostParts.length > 0) {
+    ctx.fillStyle = '#FFF8';
+    ctx.font = '11px monospace';
+    ctx.fillText('Lost: ' + lostParts.join(', '), 20, H-20);
+  }
+
+  // Flying controls hint
+  if(flyMode) {
+    ctx.fillStyle = '#FFF4';
+    ctx.font = '11px monospace';
+    ctx.fillText('Arrow Keys to Fly!', W-160, H-20);
+  }
+}
+
+function drawTitle() {
+  // Background
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, '#1a0a2e');
+  grad.addColorStop(0.5, '#2a1a0e');
+  grad.addColorStop(1, '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+  drawStars(frameCount);
+
+  // Giant pancake
+  ctx.fillStyle = '#D4A017';
+  ctx.beginPath(); ctx.ellipse(W/2, H/2+30, 180, 40, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath(); ctx.ellipse(W/2, H/2+20, 180, 40, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#F4C430';
+  ctx.beginPath(); ctx.ellipse(W/2, H/2+20, 150, 30, 0, 0, Math.PI*2); ctx.fill();
+  // Butter
+  ctx.fillStyle = '#FFE44D';
+  ctx.fillRect(W/2-15, H/2+5, 30, 12);
+  // Syrup drips
+  ctx.fillStyle = '#8B4513';
+  for(let i=0;i<8;i++) {
+    const sx = W/2-120+i*35;
+    const drip = Math.sin(frameCount*0.02+i)*10+15;
+    ctx.fillRect(sx, H/2+15, 8, drip);
+  }
+
+  // Title
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 48px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('THE PANCAKE', W/2, 120);
+  ctx.fillText('HEIST', W/2, 175);
+
+  ctx.fillStyle = '#FFF';
+  ctx.font = '18px monospace';
+  ctx.fillText('A Platform Game', W/2, 220);
+  ctx.fillStyle = '#AAA';
+  ctx.font = '14px monospace';
+  ctx.fillText('Based on the story by Owen Crowley', W/2, 250);
+
+  // Animated character
+  const bx = W/2 + Math.sin(frameCount*0.03)*100;
+  const by = H/2 + 100 + Math.sin(frameCount*0.05)*10;
+  ctx.fillStyle = '#4488FF';
+  ctx.fillRect(bx-6, by, 12, 14);
+  ctx.fillStyle = '#FFCC88';
+  ctx.fillRect(bx-5, by-12, 10, 12);
+  ctx.fillStyle = '#553300';
+  ctx.fillRect(bx-5, by-14, 10, 5);
+  // Bike
+  ctx.fillStyle = '#C44';
+  ctx.fillRect(bx-10, by+10, 20, 4);
+  ctx.fillStyle = '#666';
+  ctx.beginPath(); ctx.arc(bx-8, by+18, 5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(bx+8, by+18, 5, 0, Math.PI*2); ctx.fill();
+
+  // Prompt
+  ctx.fillStyle = frameCount%60<40 ? '#FFF' : '#FFF0';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText('PRESS SPACE TO START', W/2, H-60);
+
+  ctx.fillStyle = '#888';
+  ctx.font = '12px monospace';
+  ctx.fillText('Arrow Keys / WASD to move | SPACE to jump', W/2, H-30);
+
+  ctx.textAlign = 'left';
+}
+
+function drawStory() {
+  const ch = chapters[level];
+  // Background
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, ch.bg);
+  grad.addColorStop(1, '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+  drawStars(frameCount);
+
+  // Chapter card
+  ctx.fillStyle = '#0008';
+  ctx.fillRect(W/2-320, H/2-180, 640, 360);
+  ctx.strokeStyle = ch.platformColor;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(W/2-320, H/2-180, 640, 360);
+
+  // Title
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 28px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(ch.title, W/2, H/2-120);
+
+  // Story text
+  ctx.fillStyle = '#DDD';
+  ctx.font = '16px monospace';
+  const lines = ch.story.split('\n');
+  lines.forEach((line, i) => {
+    const alpha = Math.min(1, (storyTimer - i*20) / 30);
+    if(alpha > 0) {
+      ctx.fillStyle = `rgba(220,220,220,${alpha})`;
+      ctx.fillText(line, W/2, H/2 - 60 + i*30);
+    }
+  });
+
+  // Level type indicator
+  ctx.fillStyle = '#888';
+  ctx.font = '13px monospace';
+  const typeLabels = {
+    ride: '🚲 Bike Ride Level',
+    bike_chaos: '🔧 Bike Falling Apart!',
+    house: '🏠 House Infiltration',
+    stealth: '🤫 Stealth Mission',
+    puzzle: '🧩 Puzzle Level',
+    flying: '✈️ Flying Bike!',
+    chase: '💨 Chase Level!',
+    boss: '👊 Boss Fight!',
+    finale: '🌙 The Finale'
+  };
+  ctx.fillText(typeLabels[ch.type] || '', W/2, H/2+80);
+
+  // Continue prompt
+  if(storyTimer > 30) {
+    ctx.fillStyle = frameCount%60<40 ? '#FFF' : '#FFF0';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText('PRESS SPACE TO PLAY', W/2, H/2+140);
+  }
+
+  ctx.textAlign = 'left';
+}
+
+function drawGameOver() {
+  ctx.fillStyle = '#000C';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#FF4444';
+  ctx.font = 'bold 48px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('GAME OVER', W/2, H/2-40);
+  ctx.fillStyle = '#FFF';
+  ctx.font = '18px monospace';
+  ctx.fillText(`Final Score: ${score}`, W/2, H/2+10);
+  ctx.fillText(`Reached: ${chapters[level].title}`, W/2, H/2+40);
+  ctx.fillStyle = '#AAA';
+  ctx.font = '14px monospace';
+  ctx.fillText('"Your dead there Coming For you" - Owen Crowley', W/2, H/2+80);
+  ctx.fillStyle = frameCount%60<40 ? '#FFF' : '#FFF0';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('PRESS R TO RETRY', W/2, H/2+130);
+  ctx.textAlign = 'left';
+}
+
+function drawWin() {
+  ctx.fillStyle = '#000C';
+  ctx.fillRect(0,0,W,H);
+
+  // Pancake rain
+  for(let i=0;i<15;i++) {
+    const px = (i*73 + frameCount*0.5) % W;
+    const py = (i*97 + frameCount*1.5) % H;
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath(); ctx.ellipse(px, py, 15, 5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#D4A017';
+    ctx.beginPath(); ctx.ellipse(px, py+3, 15, 5, 0, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 42px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('YOU COMPLETED', W/2, H/2-80);
+  ctx.fillText('THE PANCAKE HEIST!', W/2, H/2-30);
+  ctx.fillStyle = '#FFF';
+  ctx.font = '20px monospace';
+  ctx.fillText(`Final Score: ${score}`, W/2, H/2+30);
+  ctx.fillStyle = '#AAA';
+  ctx.font = '16px monospace';
+  ctx.fillText('"Buy on eBay for 1 penny"', W/2, H/2+70);
+  ctx.fillText('- Owen Crowley', W/2, H/2+95);
+  ctx.fillStyle = frameCount%60<40 ? '#FFF' : '#FFF0';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('PRESS R TO PLAY AGAIN', W/2, H/2+140);
+  ctx.textAlign = 'left';
+}
+
+// --- MAIN LOOP ---
+function gameLoop() {
+  update();
+
+  ctx.clearRect(0,0,W,H);
+
+  if(state === 'title') {
+    drawTitle();
+  } else if(state === 'story') {
+    drawStory();
+  } else if(state === 'play') {
+    const ch = chapters[level];
+    drawBG(ch);
+    drawPlatforms(ch);
+    drawCoins();
+    drawClueBoxes();
+    drawGoal();
+    drawEnemies();
+    drawCheeseBalls();
+    drawPlayer();
+    drawParticles();
+    drawHUD();
+  } else if(state === 'gameover') {
+    drawGameOver();
+  } else if(state === 'win') {
+    drawWin();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
