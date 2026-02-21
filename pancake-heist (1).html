@@ -595,26 +595,50 @@ function drawPlatforms(ch) {
     const sx = p.x - camera.x, sy = p.y;
     if(sx > -p.w && sx < W + p.w) {
       if(p.type === 'ground') {
-        // Grass-topped ground
+        // Deep dirt base
         ctx.fillStyle = '#3a2a1a';
-        ctx.fillRect(sx, sy, p.w, p.h);
+        ctx.fillRect(sx, sy+10, p.w, p.h-10);
+        // Dirt strata lines
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        ctx.fillRect(sx, sy+12, p.w, 2);
+        ctx.fillRect(sx, sy+24, p.w, 2);
+        // Upper soil band
+        ctx.fillStyle = '#5a3a1a';
+        ctx.fillRect(sx, sy+4, p.w, 8);
+        // Grass top strip
         ctx.fillStyle = ch.ground;
-        ctx.fillRect(sx, sy, p.w, 8);
-        // Grass blades
-        ctx.fillStyle = '#4a8';
-        for(let gx=sx;gx<sx+p.w;gx+=6) {
-          ctx.fillRect(gx, sy-2, 2, 4);
+        ctx.fillRect(sx, sy, p.w, 6);
+        // Grass blades — vary height and shade per column
+        for(let gx=sx; gx<sx+p.w; gx+=5) {
+          const bh = 3 + (gx*7)%3;
+          const g = (gx*11)%30;
+          ctx.fillStyle = `rgb(${0x33+g%14},${0x88+g},${0x30+g%10})`;
+          ctx.fillRect(gx, sy-bh, 2, bh+2);
         }
       } else if(p.type === 'ceiling') {
         ctx.fillStyle = '#2a2a3a';
         ctx.fillRect(sx, sy, p.w, p.h);
+        // Ceiling trim
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(sx, sy+p.h-3, p.w, 3);
       } else {
-        // Floating platform
+        // Drop shadow beneath platform
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.fillRect(sx+4, sy+p.h, p.w, 5);
+        // Platform body
         ctx.fillStyle = ch.platformColor;
         ctx.fillRect(sx, sy, p.w, p.h);
-        ctx.fillStyle = '#fff3';
+        // Wood-plank dividers
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        const plankW = Math.max(16, Math.floor(p.w/3));
+        for(let lx=sx+plankW; lx<sx+p.w-4; lx+=plankW) {
+          ctx.fillRect(lx, sy+2, 1, p.h-4);
+        }
+        // Top highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
         ctx.fillRect(sx, sy, p.w, 3);
-        ctx.fillStyle = '#0003';
+        // Bottom edge shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
         ctx.fillRect(sx, sy+p.h-3, p.w, 3);
       }
     }
@@ -624,6 +648,16 @@ function drawPlatforms(ch) {
 function drawPlayer() {
   const px = player.x - camera.x, py = player.y;
   if(player.invincible > 0 && frameCount % 4 < 2) return;
+
+  // Ground shadow (only when near a surface)
+  if(player.grounded || player.vy > 0) {
+    const shadowY = py + player.h + 2;
+    const shadowW = player.w * 1.2;
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath();
+    ctx.ellipse(px + player.w/2, shadowY, shadowW/2, 4, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
 
   ctx.save();
   ctx.translate(px + player.w/2, py + player.h/2);
@@ -863,46 +897,78 @@ function drawGoal() {
 }
 
 function drawHUD() {
-  // Score
-  ctx.fillStyle = '#000A';
-  ctx.fillRect(10, 10, 200, 45);
+  // Score panel — dark fill + gold inner glow strip + gold border
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(8, 8, 206, 51);
+  ctx.fillStyle = 'rgba(255,215,0,0.08)';
+  ctx.fillRect(9, 9, 204, 49);
+  ctx.fillStyle = 'rgba(255,215,0,0.45)';
+  ctx.fillRect(8, 8, 206, 2);   // top border
+  ctx.fillRect(8, 57, 206, 2);  // bottom border
+  ctx.fillRect(8, 8, 2, 51);    // left border
+  ctx.fillRect(212, 8, 2, 51);  // right border
   ctx.fillStyle = '#FFD700';
   ctx.font = 'bold 16px monospace';
   ctx.fillText(`SCORE: ${score}`, 20, 30);
   ctx.fillStyle = '#FF4444';
-  ctx.fillText(`LIVES: ${'♥'.repeat(Math.max(0,lives))}`, 20, 48);
+  ctx.fillText(`LIVES: ${'♥'.repeat(Math.max(0,lives))}`, 20, 50);
 
-  // Chapter title
-  ctx.fillStyle = '#FFF8';
+  // Chapter title — centred, subtle pill background
+  const titleW = 260;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(W/2-titleW/2, 6, titleW, 22);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(W/2-titleW/2, 6, titleW, 2);
+  ctx.fillStyle = '#FFFFFFcc';
   ctx.font = '12px monospace';
-  ctx.fillText(chapters[level].title, W/2-100, 20);
+  ctx.textAlign = 'center';
+  ctx.fillText(chapters[level].title, W/2, 21);
+  ctx.textAlign = 'left';
 
-  // Boss HP
+  // Boss HP bar — polished with border and label
   if(bossHP > 0) {
     const boss = enemies.find(e=>e.type==='boss'&&e.alive);
     if(boss) {
-      ctx.fillStyle = '#0008';
-      ctx.fillRect(W/2-100, 40, 200, 16);
-      ctx.fillStyle = '#F44';
-      ctx.fillRect(W/2-98, 42, 196*(boss.hp/20), 12);
+      const bx = W/2-110, by = 36, bw = 220, bh = 18;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(bx-2, by-2, bw+4, bh+4);
+      ctx.fillStyle = '#1a0000';
+      ctx.fillRect(bx, by, bw, bh);
+      const pct = boss.hp / 20;
+      // HP fill with gradient
+      const hpGrad = ctx.createLinearGradient(bx, 0, bx+bw*pct, 0);
+      hpGrad.addColorStop(0, '#FF2222');
+      hpGrad.addColorStop(1, '#FF6666');
+      ctx.fillStyle = hpGrad;
+      ctx.fillRect(bx, by, bw*pct, bh);
+      // Border
+      ctx.fillStyle = 'rgba(255,100,100,0.5)';
+      ctx.fillRect(bx, by, bw, 2);
+      ctx.fillRect(bx, by+bh-2, bw, 2);
       ctx.fillStyle = '#FFF';
-      ctx.font = '10px monospace';
-      ctx.fillText('FAMILY CAR', W/2-30, 52);
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`FAMILY CAR  ${boss.hp}/20`, W/2, by+13);
+      ctx.textAlign = 'left';
     }
   }
 
   // Lost bike parts
   if(lostParts.length > 0) {
-    ctx.fillStyle = '#FFF8';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(8, H-32, 180, 22);
+    ctx.fillStyle = '#FFFFFFcc';
     ctx.font = '11px monospace';
-    ctx.fillText('Lost: ' + lostParts.join(', '), 20, H-20);
+    ctx.fillText('Lost: ' + lostParts.join(', '), 14, H-17);
   }
 
   // Flying controls hint
   if(flyMode) {
-    ctx.fillStyle = '#FFF4';
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(W-175, H-32, 167, 22);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = '11px monospace';
-    ctx.fillText('Arrow Keys to Fly!', W-160, H-20);
+    ctx.fillText('\u25b2\u25bc Arrow Keys to Fly', W-170, H-17);
   }
 }
 
