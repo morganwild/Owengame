@@ -67,13 +67,14 @@ canvas { width: 100% !important; }
 
 <div class="header">
 <h1>UK Foreign National Crime Tracker</h1>
-<p>Prison population by nationality cross-referenced with Home Office asylum system data | Sources: MOJ OMSQ Dec 2025, Home Office Asy_D01/D02/D03/D09 YE Sep 2025</p>
+<p>Prison population &amp; convictions by nationality cross-referenced with Home Office asylum data | Sources: MOJ OMSQ Dec 2025, PNC Convictions (FOI 2021-23), Home Office Asy_D01-D09 YE Sep 2025</p>
 </div>
 
 <div class="tabs">
 <div class="tab active" data-tab="overview">Overview</div>
 <div class="tab" data-tab="table">Nationality Table</div>
 <div class="tab" data-tab="offences">Offence Breakdown</div>
+<div class="tab" data-tab="convictions">Convictions by Nationality</div>
 <div class="tab" data-tab="trends">Trends</div>
 <div class="tab" data-tab="sources">Data Sources</div>
 </div>
@@ -145,7 +146,7 @@ canvas { width: 100% !important; }
 <!-- OFFENCE BREAKDOWN -->
 <div id="offences" class="panel">
 <div class="note">
-<strong>Note:</strong> The MOJ publishes offence breakdowns for foreign nationals as a <em>group</em>, not by individual nationality. This shows what foreign nationals in prison are convicted of compared to British nationals. Drug offences and miscellaneous crimes (immigration offences) are notably over-represented among foreign nationals; violence and sexual offences are under-represented relative to British nationals.
+<strong>Note:</strong> The MOJ publishes <em>prison</em> offence breakdowns for foreign nationals as a group, not by individual nationality. For conviction data broken down by individual nationality, see the <strong>Convictions by Nationality</strong> tab. Drug offences and miscellaneous crimes (immigration offences) are notably over-represented among foreign nationals; violence and sexual offences are under-represented relative to British nationals in the prison population.
 </div>
 <div class="chart-container">
 <h3>Prison Population by Offence Group: Foreign Nationals vs British Nationals (30 June 2025)</h3>
@@ -160,6 +161,60 @@ canvas { width: 100% !important; }
 <div id="offence-ts-container">
 <svg id="offence-ts" width="100%" height="350"></svg>
 </div>
+</div>
+</div>
+
+<!-- CONVICTIONS BY NATIONALITY -->
+<div id="convictions" class="panel">
+<div class="note">
+<strong>New data source:</strong> Convictions data from the Police National Computer (PNC), obtained via FOI request to the Ministry of Justice by the Centre for Migration Control (Jan 2025). Covers non-summary convictions in England &amp; Wales, 2021-2023. This is distinct from the prison population data (MOJ OMSQ) which shows who is currently in prison. Convictions data shows who was found guilty in court, regardless of sentence length.
+</div>
+
+<div class="stat-cards" id="conv-stat-cards"></div>
+
+<div class="info-grid">
+<div class="chart-container">
+<h3>Conviction Rate Ratios: Foreign Nationals vs British (2021-2023)</h3>
+<p style="font-size:11px;color:#6b7585;margin-bottom:12px">A ratio of 1.0 = same rate as British nationals. Values above 1.0 indicate a higher per-capita conviction rate.</p>
+<div id="rate-ratio-bars"></div>
+</div>
+<div class="chart-container">
+<h3>FN Conviction Trends 2021-2024</h3>
+<p style="font-size:11px;color:#6b7585;margin-bottom:12px">Year-on-year change in foreign national convictions by offence type</p>
+<div id="conv-trend-bars"></div>
+</div>
+</div>
+
+<div class="controls">
+<select id="conv-crime-filter">
+<option value="total">All Convictions (Total)</option>
+<option value="sexual">Sexual Offences</option>
+<option value="violence">Violence</option>
+<option value="drugs">Drug Offences</option>
+<option value="theft">Theft</option>
+</select>
+</div>
+<div class="chart-container">
+<h3 id="conv-chart-title">Top Nationalities by Total Convictions (2021-2023)</h3>
+<div id="conv-nationality-bars"></div>
+</div>
+
+<div class="chart-container">
+<h3>Highest Per-Capita Conviction Rates</h3>
+<div class="info-grid">
+<div>
+<h3 style="font-size:13px;color:#8b95a5;margin-bottom:8px">Overall Crime (per 10,000 population)</h3>
+<div id="conv-percapita-overall"></div>
+</div>
+<div>
+<h3 style="font-size:13px;color:#8b95a5;margin-bottom:8px">Sexual Offences (per 10,000 population)</h3>
+<div id="conv-percapita-sexual"></div>
+</div>
+</div>
+</div>
+
+<div class="note" style="border-left-color:#3b82f6">
+<strong style="color:#3b82f6">Migration Observatory context:</strong> After adjusting for age and sex demographics, the Oxford Migration Observatory found that non-citizens are actually <em>under-represented</em> in the prison population. If foreign nationals were imprisoned at the same age/sex-adjusted rates as British nationals, there would be 13,615 non-citizen prisoners (15% of population) rather than the actual 10,422 (12%) — a difference of 3,193 fewer than expected. Conviction rates vary considerably by nationality, offence type, and demographic factors.
 </div>
 </div>
 
@@ -200,6 +255,8 @@ canvas { width: 100% !important; }
 <tr><td>Home Office</td><td>Asy_D03</td><td>Cases awaiting decision by nationality</td><td>30 Sep 2025</td></tr>
 <tr><td>Home Office</td><td>Asy_D09</td><td>People receiving asylum support by nationality (best denominator)</td><td>30 Sep 2025</td></tr>
 <tr><td>Home Office</td><td>Ret_D01</td><td>Returns from UK by nationality</td><td>YE Sep 2025</td></tr>
+<tr><td>MOJ (FOI)</td><td>Police National Computer</td><td>Convictions by nationality x offence type (via Centre for Migration Control FOI)</td><td>2021-2023</td></tr>
+<tr><td>Migration Observatory</td><td>Commentary</td><td>Age/sex adjusted analysis, conviction rate context</td><td>Oct 2025</td></tr>
 </tbody>
 </table>
 </div>
@@ -216,7 +273,7 @@ canvas { width: 100% !important; }
 </table>
 </div>
 <div class="note">
-<strong>Key limitation:</strong> The MOJ does not publish offence breakdowns by <em>individual</em> nationality - only by nationality group (British / Foreign National / Not Recorded). Prison counts by individual nationality are total headcounts only. Additionally, asylum support population (denominator) does not capture EU/EEA nationals or people on other visa routes, so per-capita rates are only meaningful for asylum-origin nationalities.
+<strong>Key limitation:</strong> The MOJ does not publish <em>prison population</em> offence breakdowns by individual nationality - only by nationality group (British / Foreign National / Not Recorded). However, <em>conviction</em> data by nationality x crime type is now available via FOI from the Police National Computer (see Convictions tab). Asylum support population (denominator) does not capture EU/EEA nationals or people on other visa routes, so per-capita rates are only meaningful for asylum-origin nationalities.
 </div>
 </div>
 
@@ -498,6 +555,123 @@ function drawTrend() {
 
 trendSelect.addEventListener('change', drawTrend);
 drawTrend();
+
+// === CONVICTIONS BY NATIONALITY (PNC DATA) ===
+const pnc = DATA.pnc_convictions;
+const migObs = DATA.migration_observatory;
+
+if (pnc) {
+    // Stat cards
+    const convCards = [
+        { label: 'FN Convictions (2021-23)', value: (pnc.total_fn_convictions || 0).toLocaleString(), sub: 'From Police National Computer' },
+        { label: 'FN Share of Convictions', value: pnc.fn_share_pct_low + '-' + pnc.fn_share_pct_high + '%', sub: 'vs ' + pnc.fn_population_share_pct + '% of population' },
+        { label: 'Nationalities > British Rate', value: (pnc.conviction_rate_per_10k.nationalities_higher_than_british || 0).toString(), sub: 'Out of all nationalities tracked' },
+        { label: 'FN Conviction Growth', value: '+' + pnc.fn_trend_2021_2024.fn_increase_pct + '%', sub: '2021-2024 (BN: +' + pnc.fn_trend_2021_2024.bn_increase_pct + '%)' }
+    ];
+    const convCardsEl = document.getElementById('conv-stat-cards');
+    convCards.forEach(c => {
+        convCardsEl.innerHTML += '<div class="stat-card"><div class="label">' + c.label + '</div><div class="value">' + c.value + '</div><div class="sub">' + c.sub + '</div></div>';
+    });
+
+    // Rate ratio bars
+    const rateRatios = [
+        { crime: 'Sexual Assault on Female', ratio: pnc.sexual_assault_2024.rate_ratio, color: '#ef4444' },
+        { crime: 'Sexual Offences (all)', ratio: pnc.totals_by_crime.sexual.rate_ratio, color: '#f97316' },
+        { crime: 'Drug Offences', ratio: pnc.totals_by_crime.drugs.rate_ratio, color: '#eab308' },
+        { crime: 'Weapon Possession', ratio: pnc.totals_by_crime.weapons.rate_ratio, color: '#a855f7' },
+        { crime: 'All Crime Types', ratio: 1.39, color: '#3b82f6' },
+        { crime: 'Robbery', ratio: pnc.totals_by_crime.robbery.rate_ratio, color: '#06b6d4' },
+        { crime: 'Theft', ratio: pnc.totals_by_crime.theft.rate_ratio, color: '#22c55e' }
+    ].sort((a, b) => b.ratio - a.ratio);
+
+    const maxRatio = Math.max(...rateRatios.map(r => r.ratio));
+    const rrContainer = document.getElementById('rate-ratio-bars');
+    rateRatios.forEach(r => {
+        const pct = (r.ratio / maxRatio * 85).toFixed(1);
+        const label = r.ratio.toFixed(2) + 'x';
+        rrContainer.innerHTML += '<div class="bar-row"><div class="bar-label" style="width:180px">' + r.crime + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + r.color + '">' + label + '</div></div>' +
+            '<div class="bar-val">' + ((r.ratio - 1) * 100).toFixed(0) + '% higher</div></div>';
+    });
+
+    // Conviction trends 2021-2024
+    const trendData = [
+        { crime: 'Criminal Damage/Arson', pct2021: 112, pct2024: 230, change: 105.3, color: '#ef4444' },
+        { crime: 'Theft', pct2021: 3485, pct2024: 6183, change: 77.4, color: '#f97316' },
+        { crime: 'Sexual Offences', pct2021: 687, pct2024: 1114, change: 62.2, color: '#eab308' },
+        { crime: 'Non-Summary Total', pct2021: 17467, pct2024: 20866, change: 19.4, color: '#3b82f6' },
+        { crime: 'Drug Offences', pct2021: 5102, pct2024: 5675, change: 11.2, color: '#a855f7' },
+        { crime: 'Weapons', pct2021: 1422, pct2024: 1562, change: 9.8, color: '#06b6d4' },
+        { crime: 'Public Order', pct2021: 1074, pct2024: 1162, change: 8.1, color: '#22c55e' }
+    ];
+    const maxChange = Math.max(...trendData.map(t => t.change));
+    const ctContainer = document.getElementById('conv-trend-bars');
+    trendData.forEach(t => {
+        const pct = (t.change / maxChange * 85).toFixed(1);
+        ctContainer.innerHTML += '<div class="bar-row"><div class="bar-label" style="width:160px">' + t.crime + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + t.color + '">+' + t.change + '%</div></div>' +
+            '<div class="bar-val">' + t.pct2021.toLocaleString() + ' → ' + t.pct2024.toLocaleString() + '</div></div>';
+    });
+
+    // Nationality conviction bars
+    const crimeLabels = { total: 'Total Convictions', sexual: 'Sexual Offences', violence: 'Violence', drugs: 'Drug Offences', theft: 'Theft' };
+
+    function renderConvBars(crimeType) {
+        const entries = Object.entries(pnc.by_nationality)
+            .map(function(entry) { return { country: entry[0], count: entry[1][crimeType] }; })
+            .filter(function(e) { return e.count !== null && e.count > 0; })
+            .sort(function(a, b) { return b.count - a.count; });
+
+        const container = document.getElementById('conv-nationality-bars');
+        document.getElementById('conv-chart-title').textContent = 'Top Nationalities: ' + crimeLabels[crimeType] + ' (2021-2023, PNC)';
+
+        if (entries.length === 0) {
+            container.innerHTML = '<p style="color:#6b7585;font-size:13px">No per-nationality data available for this crime type.</p>';
+            return;
+        }
+
+        const maxVal = entries[0].count;
+        var html = '';
+        entries.forEach(function(e) {
+            var pctW = (e.count / maxVal * 85).toFixed(1);
+            html += '<div class="bar-row"><div class="bar-label" style="width:140px">' + e.country + '</div>' +
+                '<div class="bar-track"><div class="bar-fill fn" style="width:' + pctW + '%">' + e.count.toLocaleString() + '</div></div></div>';
+        });
+        container.innerHTML = html;
+    }
+
+    document.getElementById('conv-crime-filter').addEventListener('change', function() {
+        renderConvBars(this.value);
+    });
+    renderConvBars('total');
+
+    // Per-capita conviction rate charts
+    const percapOverall = pnc.conviction_rate_per_10k.top_overall;
+    const pcOverallEl = document.getElementById('conv-percapita-overall');
+    var overallHtml = '';
+    percapOverall.forEach(function(country, i) {
+        var barW = ((5 - i) / 5 * 85).toFixed(1);
+        overallHtml += '<div class="bar-row"><div class="bar-label" style="width:120px">' + country + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + barW + '%;background:#f97316">#' + (i+1) + '</div></div></div>';
+    });
+    pcOverallEl.innerHTML = overallHtml;
+
+    const percapSexual = pnc.conviction_rate_per_10k.top_sexual;
+    const pcSexualEl = document.getElementById('conv-percapita-sexual');
+    var sexualHtml = '';
+    var sexualRates = {
+        'Afghanistan': pnc.conviction_rate_per_10k.afghan_sexual_per_10k,
+        'Eritrea': pnc.conviction_rate_per_10k.eritrean_sexual_per_10k
+    };
+    percapSexual.forEach(function(country, i) {
+        var rate = sexualRates[country];
+        var rateLabel = rate ? rate.toFixed(1) + '/10k' : '#' + (i+1);
+        var barW = rate ? (rate / 60 * 85).toFixed(1) : ((5 - i) / 5 * 60).toFixed(1);
+        sexualHtml += '<div class="bar-row"><div class="bar-label" style="width:120px">' + country + '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + barW + '%;background:#ef4444">' + rateLabel + '</div></div></div>';
+    });
+    pcSexualEl.innerHTML = sexualHtml;
+}
 </script>
 </body>
 </html>
