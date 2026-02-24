@@ -18,6 +18,7 @@ from house_buyer.stamp_duty import (
     calculate_stamp_duty, check_affordability, total_purchase_cost,
 )
 from house_buyer.land_registry import search_sold_prices, area_price_stats
+from house_buyer.job_search import search_jobs, area_job_stats, JobSearchCriteria, _sources_configured
 
 app = Flask(__name__)
 
@@ -136,7 +137,7 @@ HTML = """
 <div class="container">
   <header>
     <h1>House <span>Buyer</span> Tool</h1>
-    <p>Mortgage, stamp duty, affordability &amp; property data</p>
+    <p>Mortgage, stamp duty, affordability, property data &amp; job market</p>
     <div class="badge">BoE Base Rate: {{ base_rate }}%</div>
   </header>
 
@@ -147,6 +148,7 @@ HTML = """
     <div class="tab" onclick="showTab('afford')">Affordability</div>
     <div class="tab" onclick="showTab('costs')">Purchase Costs</div>
     <div class="tab" onclick="showTab('area')">Area Prices</div>
+    <div class="tab" onclick="showTab('jobs')">Job Market</div>
   </div>
 
   <!-- MORTGAGE CALCULATOR -->
@@ -311,6 +313,51 @@ HTML = """
     </div>
   </div>
 
+  <!-- JOB MARKET -->
+  <div id="jobs" class="panel">
+    <div class="card">
+      <h2>Job Market (Live Feeds)</h2>
+      <p style="color:var(--muted);margin-bottom:8px">Search live job listings from Adzuna &amp; Reed to assess employment in areas you're considering.</p>
+      <p style="color:var(--muted);margin-bottom:16px;font-size:0.85rem" id="j_sources"></p>
+      <div class="form-grid">
+        <div class="field">
+          <label>Location (town / city / postcode)</label>
+          <input type="text" id="j_location" placeholder="e.g. Bristol" value="London">
+        </div>
+        <div class="field">
+          <label>Keywords (optional)</label>
+          <input type="text" id="j_keywords" placeholder="e.g. software engineer">
+        </div>
+        <div class="field">
+          <label>Min Salary (optional)</label>
+          <input type="number" id="j_min_salary" placeholder="e.g. 30000">
+        </div>
+        <div class="field">
+          <label>Max Salary (optional)</label>
+          <input type="number" id="j_max_salary" placeholder="e.g. 80000">
+        </div>
+        <div class="field">
+          <label>Contract Type</label>
+          <select id="j_contract">
+            <option value="">Any</option>
+            <option value="permanent">Permanent</option>
+            <option value="contract">Contract</option>
+            <option value="temp">Temporary</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Max Results</label>
+          <input type="number" id="j_max_results" value="20" min="5" max="50">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="searchJobs()">Search Jobs</button>
+        <button class="btn" onclick="jobStats()" style="background:var(--surface2);color:var(--accent)">Area Stats</button>
+      </div>
+      <div id="j_results" class="results"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -456,6 +503,128 @@ async function calcArea() {
     ${typeRows ? `<table style="margin-top:16px"><tr><th>Type</th><th>Count</th><th>Average</th><th>Range</th></tr>${typeRows}</table>` : ''}`;
 }
 
+async function searchJobs() {
+  const loc = document.getElementById('j_location').value;
+  if (!loc) { alert('Enter a location'); return; }
+  document.getElementById('j_results').innerHTML = '<div class="loading"><div class="spinner"></div> Searching job portals...</div>';
+  const d = await api('jobs/search', {
+    location: loc,
+    keywords: document.getElementById('j_keywords').value,
+    min_salary: document.getElementById('j_min_salary').value,
+    max_salary: document.getElementById('j_max_salary').value,
+    contract_type: document.getElementById('j_contract').value,
+    max_results: document.getElementById('j_max_results').value,
+  });
+
+  if (!d.jobs || d.jobs.length === 0) {
+    document.getElementById('j_results').innerHTML = `<p style="color:var(--yellow);margin-top:16px">${d.message || 'No jobs found. Try broadening your search or check API keys.'}</p>`;
+    return;
+  }
+
+  let rows = d.jobs.map((j,i) => `<tr>
+    <td class="num" style="color:var(--muted)">${i+1}</td>
+    <td><a href="${j.url}" target="_blank" style="color:var(--accent);text-decoration:none">${esc(j.title)}</a></td>
+    <td>${esc(j.company)}</td>
+    <td class="num" style="color:var(--green)">${j.salary}</td>
+    <td>${j.type || '—'}</td>
+    <td style="color:var(--muted)">${j.source}</td>
+  </tr>`).join('');
+
+  let salaryInfo = '';
+  if (d.salary && d.salary.mean) {
+    salaryInfo = `
+      <div class="result-grid" style="margin-bottom:16px">
+        <div class="stat"><div class="label">Jobs Found</div><div class="value">${d.count}</div></div>
+        <div class="stat"><div class="label">Avg Salary</div><div class="value accent">${fmt(d.salary.mean)}</div></div>
+        <div class="stat"><div class="label">Median Salary</div><div class="value">${fmt(d.salary.median)}</div></div>
+        <div class="stat"><div class="label">Salary Range</div><div class="value" style="font-size:1rem">${fmt(d.salary.min)} — ${fmt(d.salary.max)}</div></div>
+      </div>`;
+  }
+
+  document.getElementById('j_results').innerHTML = salaryInfo +
+    `<table><tr><th>#</th><th>Title</th><th>Company</th><th>Salary</th><th>Type</th><th>Source</th></tr>${rows}</table>`;
+}
+
+async function jobStats() {
+  const loc = document.getElementById('j_location').value;
+  if (!loc) { alert('Enter a location'); return; }
+  document.getElementById('j_results').innerHTML = '<div class="loading"><div class="spinner"></div> Fetching job market data...</div>';
+  const d = await api('jobs/stats', { location: loc });
+
+  if (!d.count || d.count === 0) {
+    document.getElementById('j_results').innerHTML = `<p style="color:var(--yellow);margin-top:16px">${d.message || 'No data found. Check API keys or try a different location.'}</p>`;
+    return;
+  }
+
+  let html = '';
+
+  // Salary summary
+  const s = d.salary || {};
+  if (s.mean) {
+    html += `<div class="result-grid">
+      <div class="stat"><div class="label">Jobs Found</div><div class="value">${d.count}</div></div>
+      <div class="stat"><div class="label">Avg Salary</div><div class="value accent">${fmt(s.mean)}</div></div>
+      <div class="stat"><div class="label">Median</div><div class="value">${fmt(s.median)}</div></div>
+      <div class="stat"><div class="label">Range</div><div class="value" style="font-size:1rem">${fmt(s.min)} — ${fmt(s.max)}</div></div>
+    </div>`;
+  } else {
+    html += `<div class="result-grid">
+      <div class="stat"><div class="label">Jobs Found</div><div class="value">${d.count}</div></div>
+    </div>`;
+  }
+
+  // Category breakdown
+  if (d.by_category && Object.keys(d.by_category).length) {
+    let catRows = Object.entries(d.by_category).map(([cat, v]) =>
+      `<tr><td>${esc(cat)}</td><td class="num">${v.count}</td><td class="num" style="color:var(--green)">${v.avg_salary ? fmt(v.avg_salary) : '—'}</td></tr>`).join('');
+    html += `<h3 style="color:var(--accent);margin:16px 0 8px">By Category</h3>
+      <table><tr><th>Category</th><th>Jobs</th><th>Avg Salary</th></tr>${catRows}</table>`;
+  }
+
+  // Top employers
+  if (d.top_employers && d.top_employers.length) {
+    let empRows = d.top_employers.map(e =>
+      `<tr><td>${esc(e.name)}</td><td class="num">${e.openings}</td></tr>`).join('');
+    html += `<h3 style="color:var(--accent);margin:16px 0 8px">Top Employers</h3>
+      <table><tr><th>Employer</th><th>Openings</th></tr>${empRows}</table>`;
+  }
+
+  // Contract type
+  if (d.by_contract && Object.keys(d.by_contract).length) {
+    let ctRows = Object.entries(d.by_contract).map(([t, c]) =>
+      `<tr><td>${esc(t)}</td><td class="num">${c}</td></tr>`).join('');
+    html += `<h3 style="color:var(--accent);margin:16px 0 8px">Contract Types</h3>
+      <table><tr><th>Type</th><th>Count</th></tr>${ctRows}</table>`;
+  }
+
+  // Sample jobs
+  if (d.sample_jobs && d.sample_jobs.length) {
+    let jobRows = d.sample_jobs.map(j =>
+      `<tr><td><a href="${j.url}" target="_blank" style="color:var(--accent);text-decoration:none">${esc(j.title)}</a></td>
+       <td>${esc(j.company)}</td><td class="num" style="color:var(--green)">${j.salary}</td><td>${j.type || '—'}</td></tr>`).join('');
+    html += `<h3 style="color:var(--accent);margin:16px 0 8px">Sample Listings</h3>
+      <table><tr><th>Title</th><th>Company</th><th>Salary</th><th>Type</th></tr>${jobRows}</table>`;
+  }
+
+  document.getElementById('j_results').innerHTML = html;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+// Check configured sources on load
+(async () => {
+  try {
+    const s = await api('jobs/sources', {});
+    let parts = [];
+    if (s.adzuna) parts.push('Adzuna ✓');
+    else parts.push('Adzuna ✗ (set ADZUNA_APP_ID & ADZUNA_APP_KEY)');
+    if (s.reed) parts.push('Reed ✓');
+    else parts.push('Reed ✗ (set REED_API_KEY)');
+    const el = document.getElementById('j_sources');
+    if (el) el.textContent = 'Sources: ' + parts.join(' | ');
+  } catch(e) {}
+})();
+
 // Auto-calculate mortgage on load
 calcMortgage();
 </script>
@@ -565,6 +734,68 @@ def api_area():
     pc = request.args.get('postcode', '').strip() or None
     town = request.args.get('town', '').strip() or None
     r = area_price_stats(pc or town or '', '2023-01-01')
+    return jsonify(r)
+
+
+@app.route('/api/jobs/sources')
+def api_job_sources():
+    return jsonify(_sources_configured())
+
+
+@app.route('/api/jobs/search')
+def api_job_search():
+    criteria = JobSearchCriteria(
+        location=request.args.get('location', '').strip(),
+        keywords=request.args.get('keywords', '').strip(),
+        min_salary=int(request.args['min_salary']) if request.args.get('min_salary') else None,
+        max_salary=int(request.args['max_salary']) if request.args.get('max_salary') else None,
+        contract_type=request.args.get('contract_type', '').strip(),
+        max_results=min(int(request.args.get('max_results', 20)), 50),
+    )
+
+    jobs = search_jobs(criteria)
+
+    # Compute salary stats from results
+    salaries = [j.salary_mid for j in jobs if j.salary_mid and j.salary_mid > 0]
+    salary_stats = {}
+    if salaries:
+        sorted_sal = sorted(salaries)
+        n = len(sorted_sal)
+        salary_stats = {
+            "count_with_salary": n,
+            "min": round(sorted_sal[0]),
+            "max": round(sorted_sal[-1]),
+            "mean": round(sum(sorted_sal) / n),
+            "median": round(sorted_sal[n // 2]),
+        }
+
+    return jsonify(
+        count=len(jobs),
+        salary=salary_stats,
+        jobs=[
+            {
+                "title": j.title,
+                "company": j.company,
+                "location": j.location,
+                "salary": j.salary_display,
+                "type": j.contract_type or "",
+                "url": j.url,
+                "posted": j.posted,
+                "category": j.category,
+                "source": j.source,
+            }
+            for j in jobs
+        ],
+        sources=_sources_configured(),
+    )
+
+
+@app.route('/api/jobs/stats')
+def api_job_stats():
+    location = request.args.get('location', '').strip()
+    if not location:
+        return jsonify(count=0, message="Location is required")
+    r = area_job_stats(location)
     return jsonify(r)
 
 
